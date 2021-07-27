@@ -1,0 +1,533 @@
+---
+title: "Exploring relationship between residential racial segregation and mean life expectancy in the United States."
+author: "Gregory Utkin"
+date: "December 17, 2020"
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+
+<style type="text/css">
+
+h1.title {
+  font-size: 26px;
+  color: Black;
+  text-align: center;
+}
+h4.author { 
+  font-size: 18px;
+  color: Black;
+  text-align: center;
+}
+h4.date {
+  font-size: 12px;
+  color: Black;
+  text-align: center;
+}
+</style>
+
+```{r setup, include=FALSE, warning=F}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = TRUE,
+	warning = TRUE
+)
+
+library(tidyverse)
+library(data.table)
+library(tidycensus)
+library(segregation)
+library(lme4)
+library(lmerTest)
+library(here)
+library(stargazer)
+library(gt)
+library(gtsummary)
+library(kableExtra)
+library(tinytex)
+library(broom)
+library(broom.mixed)
+library(corrgram)
+
+options(scipen = 9199)
+
+setwd(here("final_proj"))
+
+df <- fread("new_df.csv", 
+            data.table = F)
+
+new_df <- df %>%
+  transmute(
+    NAME, 
+    state,
+    not_urban = factor(not_urban, labels = c("High Population", "Low Population")),
+    total_pop,
+    segregation = ls,
+    pct_unemployed,
+    pct_manu_work,
+    pct_female,
+    pct_female_hh,
+    pct_white,
+    pct_black,
+    pct_asian,
+    pct_hispanic,
+    med_housing_val = median_housing_valueE,
+    ses_comp,
+    pct_poverty,
+    gini_idx = gini_idxE,
+    pct_bachlor_or_more,
+    pct_high_sch,
+    pct_no_health_ins = (no_health_insuranceE / total_pop) * 100,
+    pct_married = (now_marriedE / total_pop)*100,
+    mean_life_exp
+  )
+
+# new_df[is.na(new_df)] <- 0
+
+```
+
+
+<h3>**Figure 1. **</h3>
+
+<center>
+```{r,echo=FALSE, results='hide',message=FALSE}
+p1 <- new_df %>%
+  na.omit() %>%
+  ggplot(aes(ses_comp, mean_life_exp)) +
+  geom_point(color = "darkblue", alpha = 0.3) +
+  geom_smooth(method = "lm", color = "red", se = F) +
+  ggthemes::theme_tufte() +
+  labs(
+    title = "SES Composite & Mean Life Expectancy",
+    x = "SES Composite", 
+    y = "Mean Life Expectancy",
+    caption = "ACS 2017 5-year estimates
+               CDC.gov county level life expectancy"
+  ) +
+  theme(
+    plot.title = element_text(family = "sans", 
+                              color = "royalblue1", 
+                              size = 9, 
+                              face = "bold", 
+                              hjust = 0.5)) + 
+  scale_x_log10()
+
+p2 <- new_df %>%
+  na.omit() %>%
+  ggplot(aes(segregation, mean_life_exp)) +
+  geom_point(color = "darkblue", alpha = 0.3) +
+  geom_smooth(method = "lm", color = "red", se = F) +
+  ggthemes::theme_tufte() +
+  labs(
+    title = "Residential Racial Segregation Index\n & Mean Life Expectancy",
+    x = "Racial Segregation Index", 
+    y = "Mean Life Expectancy",
+    caption = "ACS 2017 5-year estimates
+               CDC.gov county level life expectancy"
+  ) +
+  theme(
+    plot.title = element_text(family = "sans", 
+                              color = "royalblue1", 
+                              size = 9, 
+                              face = "bold", 
+                              hjust = 0.5)) +
+  scale_x_log10()
+
+
+two_plots <- cowplot::plot_grid(p1, p2, labels = "AUTO")
+two_plots
+#ggsave("two_plots_seg.jpeg", two_plots)
+
+ggplot(new_df, aes(mean_life_exp)) +
+  geom_histogram()
+
+ggplot(new_df, aes(segregation)) +
+  geom_histogram()
+
+ggplot(new_df, aes(ses_comp)) +
+  geom_histogram()
+```
+
+</center>
+
+<br>
+
+
+<br>
+
+
+<br>
+
+<h3>**Research Question**</h4>
+
+Main question of this of this paper asks if residential racial segregation is related to mean life expectancy in across counties in the United States? This paper also asks if various demographic variables such as SES index, percent single female households, percent high school degrees in a county are all related to mean life expectancy of a county?
+
+
+<br>
+
+
+
+
+
+<br>
+
+<h3>**Table 1. Descriptive Statistics**</h3> 
+
+```{r message=TRUE, warning=TRUE, paged.print=TRUE}
+
+new_df_tbl <- new_df %>%
+  select(
+    `Mean Life Expectancy` = mean_life_exp,
+    `High/Low population` = not_urban,
+    `Total Population` = total_pop,
+    `Racial Segregation M Index` = segregation,
+    `% Unemployed` = pct_unemployed,
+    `% Female` = pct_female,
+    `% Female householder` = pct_female_hh,
+    `% White` = pct_white,
+    `% Black` = pct_black,
+    `% Asian` = pct_asian,
+    `% Hispanic/Latino` = pct_hispanic,
+    `% Manufacturing job` = pct_manu_work,
+    `SES Index` = ses_comp,
+    `Mean House Value` = med_housing_val,
+    `% Poverty` = pct_poverty,
+    `% Bachelor or higher degree` = pct_bachlor_or_more,
+    `% High school degree` = pct_high_sch,
+    `% Married` = pct_married
+  )
+
+new_df_tbl %>%
+  tbl_summary(
+    statistic = list(all_continuous() ~ "{mean} ({sd})",
+                     all_categorical() ~ "{n} / {N} ({p}%)"),
+    digits = all_continuous() ~ 2,
+    missing_text = "(Missing)"
+  ) %>%
+  bold_labels() %>%
+  modify_header(label ~ "**Variable**") %>%
+  as_flex_table()
+
+```
+
+<br>
+
+
+
+
+<br>
+
+<h3>**Results**</h3>
+
+<br>
+
+
+<h3>**Table 2. T-test Results: Mean Life Expectancy by Urban/Not-Urban classification.**</h3>
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+####T-tests
+Ttest_life <- t.test(new_df$mean_life_exp ~ new_df$not_urban)
+Ttest_ses <- t.test(new_df$ses_comp ~ new_df$not_urban)
+Ttest_seg <- t.test(new_df$segregation ~ new_df$not_urban)
+
+Ttest_est <- as.data.frame(rbind(Ttest_life$estimate, 
+                                 Ttest_ses$estimate, 
+                                 Ttest_seg$estimate))
+
+rownames(Ttest_est) <- c("LifeExpectancy", "SES", "M index Segregation")
+
+Ttest_est$var <- row.names(Ttest_est)
+Ttest_est$diff <- Ttest_est$`mean in group High Population` - Ttest_est$`mean in group Low Population`
+Ttest_est <- Ttest_est[, c(3, 1, 2, 4)]
+
+Ttest_pval <- as.data.frame(rbind(Ttest_life$p.value,
+                                  Ttest_ses$p.value,
+                                  Ttest_seg$p.value))
+
+Ttest_pval$Sig <- ifelse(Ttest_pval$V1<0.05,"*","ns")
+Ttest_pval$Sig <- ifelse(Ttest_pval$V1<0.01,"**",Ttest_pval$Sig)
+Ttest_pval$Sig <- ifelse(Ttest_pval$V1<0.001,"***",Ttest_pval$Sig)
+Ttest_pval <- as.data.frame(Ttest_pval[,c(2)])
+
+TTest_results <- cbind(Ttest_est,Ttest_pval)
+colnames(TTest_results) <- c("Variable","Group urban mean","Group not urban mean","Mean Difference","Sig")
+
+kable(TTest_results, row.names = FALSE, digits=2)%>%
+      kable_styling(full_width=F, position="left")
+
+```
+<br>
+<br>
+
+<h3>**Figure 2.**</h3>
+
+```{r}
+ggplot(new_df, aes(segregation, fill = not_urban, color = not_urban, alpha = 0.6)) +
+  geom_histogram(stat = "bin", position = "identity", bins = 55) +
+  theme_minimal() +
+  labs(
+    title = "Distribution of Racial Segregation by Urban/Not Urban classification"
+  ) +
+  guides(not_urban = "legend", alpha = "none")
+
+```
+
+
+<br>
+<br>
+
+```{r include=FALSE}
+
+# correlation chart
+vars_cor <- new_df %>%
+  select(mean_life_exp, segregation, ses_comp, pct_unemployed, pct_manu_work)
+
+corrgram(vars_cor, upper.panel = panel.shade, lower.panel = panel.cor, order = T)
+
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+new_df <- new_df %>%
+  mutate(
+    state = factor(state, ordered = T),
+    not_urban = relevel(not_urban, ref = "High Population")
+  )
+
+icc.lmer <- function(modl){
+  vars <- as.data.frame(VarCorr(modl))[4]
+  total <- sum(vars)
+  tau00 <- vars[1,1]
+  icc <- tau00/total
+  return(icc)
+}
+
+
+
+null_mod <- lmer(mean_life_exp ~ 1 + (1 | state), data = df)
+
+#summary(null_mod)
+#icc.lmer(null_mod)
+#step(null_mod)
+
+
+model_1 <- lmer(mean_life_exp ~ 1 + segregation + (1 | state), data = new_df)
+#summary(model_1)
+#step(model_1)
+#icc.lmer(model_1)
+#plot(effects::predictorEffects(model_1, ~segregation))
+
+
+
+
+model_2 <- lmer(mean_life_exp ~ 1 + segregation + ses_comp + not_urban + (1 | state), data = new_df)
+#summary(model_2)
+#step(model_1)
+#plot(effects::predictorEffects(model_2))
+
+model_3 <- lmer(mean_life_exp ~ 1 + segregation + ses_comp + not_urban + pct_unemployed + pct_manu_work + (segregation | state), data = new_df)
+#summary(model_3)
+#step(model_3)
+#icc.lmer(model_3)
+#plot(effects::predictorEffects(model_3))
+
+
+model_3.1 <- lmer(mean_life_exp ~ 1 + segregation + ses_comp + not_urban + pct_unemployed + pct_female_hh + (1 + segregation | state), data = new_df)
+#summary(model_3.1)
+#step(model_3.1)
+
+
+model_3.2 <- lmer(mean_life_exp ~ 1 + segregation + ses_comp + not_urban + pct_unemployed + pct_female_hh + pct_high_sch + (segregation | state), data = new_df)
+#summary(model_3.2)
+#step(model_3.2)
+#icc.lmer(model_3.2)
+
+model_3.3 <- lmer(mean_life_exp ~ 1 + segregation + ses_comp + not_urban + pct_unemployed + pct_female_hh + pct_high_sch + pct_poverty + pct_manu_work:not_urban + (segregation | state), data = new_df)
+#summary(model_3.3)
+#step(model_3.3)
+
+model_3.4 <- lmer(mean_life_exp ~ 1 + segregation + ses_comp + not_urban + pct_unemployed + pct_female_hh + pct_high_sch + pct_poverty + pct_married + not_urban:pct_manu_work  + (segregation | state), data = new_df)
+#summary(model_3.4)
+#step(model_3.4)
+#plot(effects::predictorEffects(model_3.4)$segregation)
+
+#texreg::screenreg(list(model_1, model_2, model_3, model_3.1, model_3.2, model_3.3, model_3.4))
+```
+
+<br>
+
+
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+############ RANDOM EFFECTS
+
+tt2 <- tidy(model_3.4, effects = "ran_vals")
+
+
+tt2 <- tt2 %>%
+ filter(term != "(Intercept)") %>%
+ mutate(
+   state = case_when(
+    level == 1 ~ "Alabama",
+    level == 2 ~ "Alaska",
+    level == 4 ~ "Arizona",
+    level == 5 ~ "Arkansas",
+    level == 6 ~ "California",
+    level == 8 ~ "Colorado",
+    level == 9 ~ "Connecticut",
+    level == 10 ~ "Delaware",
+    level == 11 ~ "District of Columbia",
+    level == 12 ~ "Florida",
+    level == 13 ~ "Geogria",
+    level == 15 ~ "Hawaii",
+    level == 16 ~ "Idaho",
+    level == 17 ~ "Illinois",
+    level == 18 ~ "Indiana",
+    level == 19 ~ "Iowa",
+    level == 20 ~ "Kansas",
+    level == 21 ~ "Kentucky",
+    level == 22 ~ "Lousiana",
+    level == 24 ~ "Maryland",
+    level == 25 ~ "Massachusetts",
+    level == 26 ~ "Michigan",
+    level == 27 ~ "Minnesota",
+    level == 28 ~ "Mississippi",
+    level == 29 ~ "Missouri",
+    level == 30 ~ "Montana",
+    level == 31 ~ "Nebraska", 
+    level == 32 ~ "Nevada",
+    level == 33 ~ "New Hampshire",
+    level == 34 ~ "New Jersey",
+    level == 35 ~ "New Mexico",
+    level == 36 ~ "New York",
+    level == 37 ~ "North Carolina",
+    level == 38 ~ "North Dakota",
+    level == 39 ~ "Ohio",
+    level == 40 ~ "Oklahoma",
+    level == 41 ~ "Oregon",
+    level == 42 ~ "Pennsylvania",
+    level == 44 ~ "Rhode Island",
+    level == 45 ~ "South Carolina",
+    level == 46 ~ "South Dakota",
+    level == 47 ~ "Tennessee",
+    level == 48 ~ "Texas",
+    level == 49 ~ "Utah",
+    level == 50 ~ "Vermont",
+    level == 51 ~ "Virginia",
+    level == 53 ~ "Washington",
+    level == 54 ~ "West Virginia",
+    level == 56 ~ "Wyoming"
+   )
+ )  
+
+ran_plot <- tt2 %>%
+  mutate(cola = ifelse(estimate > 0 , "blue", "red")) %>%
+  ggplot(aes(fct_reorder(state, estimate), estimate, color = cola)) +
+  geom_hline(aes(yintercept = 0, alpha = 0.6)) +
+  geom_pointrange(aes(ymin = estimate-1.96*std.error,
+                      ymax = estimate+1.96*std.error)) +
+  coord_flip() +
+  ggthemes::theme_tufte() +
+  scale_color_identity() +
+  theme(legend.position = "none") +
+  labs(title = "Random Slope Effect (Segregation)",
+       y = "Estimate",
+       x = "State FIPS")
+
+
+
+
+
+################ FIXED EFFECTS
+modelOutPlot2 <- tidy(model_3.4, conf.int = TRUE)
+
+# Grab the coefficents of interest
+modelOutPlot2 <- modelOutPlot2[modelOutPlot2$effect =="fixed" &
+                               modelOutPlot2$term != "(Intercept)", ]
+
+
+
+modelOutPlot2 <- modelOutPlot2 %>%
+  mutate(
+    term = case_when(
+      term == "segregation" ~ "Segregation",
+      term == "ses_comp" ~ "SES Index",
+      term == "not_urbanLow Population" ~ "Low Population Counties",
+      term == "pct_unemployed" ~ "Percent % Unemployed",
+      term == "pct_female_hh" ~ "Percent % Female Householder",
+      term == "pct_high_sch" ~ "Percent % High School Deg.",
+      term == "pct_poverty" ~ "Percent % Poverty",
+      term == "pct_married" ~ "Percent % Married",
+      term == "not_urbanHigh Population:pct_manu_work" ~ "Percent Manufacturing:High Population",
+      term == "not_urbanLow Population:pct_manu_work" ~ "Percent Manufacturing:Low Population"
+    )
+  )
+
+
+```
+<br>
+
+<h3>**Models**</h3>
+```{r mylatextable, results = "asis", echo=FALSE}
+
+class(model_1) <- "lmerMod"
+class(model_2) <- "lmerMod"
+class(model_3) <- "lmerMod"
+class(model_3.1) <- "lmerMod"
+class(model_3.2) <- "lmerMod"
+class(model_3.3) <- "lmerMod"
+class(model_3.4) <- "lmerMod"
+
+
+stargazer(model_1, model_2, model_3, model_3.1, model_3.2, model_3.3, model_3.4, type = "html", 
+          title = "Multilevel Regression Table",
+          dep.var.labels = "Mean Life Expectancy",
+          covariate.labels = c("Segregation Index", "SES Index", "Low Population Counties", "Percent Unemployed", "Percent Work Manufacturing", "Percent Female Householder", "Percent High School Degree", "Perecnt Poverty", "Percent Married", "High Population : Percent Work Manufacturing", "Low Population : Percent Work Manufacturing"))
+
+
+```
+
+<br>
+
+<br>
+<h3>**Figure 3 & Figure 4.**</h3>
+
+```{r random_eff_plot, echo=FALSE, message=FALSE, warning=FALSE}
+
+ran_plot
+
+```
+
+<br>
+
+```{r fixed_plot, echo=FALSE, message=FALSE, warning=FALSE}
+# plot the coefficients of interest
+modelOutPlot2 %>%
+  mutate(cola = ifelse(estimate > 0, "blue", "red")) %>%
+  ggplot(aes(x = fct_reorder(term, estimate), y = estimate, 
+             color = cola,
+             ymin = conf.low,
+             ymax = conf.high)) +
+	geom_hline(yintercept = 0.0, color = 'black', size  = .5, alpha = .5) +
+	geom_point() +
+	geom_linerange() + 
+  coord_flip() +
+  scale_color_identity() + 
+  ggthemes::theme_tufte() +
+  labs(
+    title = "Fixed Effect Estimates",
+    y = "Estimate",
+    x = "Variable"
+  ) +
+  theme(
+    legend.position =  "none",
+    plot.title = element_text(family = "sans")
+  )
+
+```
+
+
